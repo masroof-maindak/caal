@@ -362,10 +362,12 @@ start:
     mov word [es:21*4], int21isr
     sti
 
-    ; TSR
+    ; TSR -- https://stanislavs.org/helppc/int_21-31.html
     mov dx, start
     add dx, 15
     mov cl, 4
-    shr dx, cl
+    shr dx, cl ; dx = 240
+               ; FIXME: dx *should* comprise 'memory size in paragraphs to
+               ; reserve'. I do NOT know where I got 240 from...
     mov ax, 3100h
     int 21h
