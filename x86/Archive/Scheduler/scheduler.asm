@@ -248,20 +248,21 @@ int08isr:
     iret
 
 int21isr:
-    ; TODO: check if ah == 4c
-    ; if so, then clean up all active threads before jumping to the oldINT21
+    ; Before terminating, clean up state
+    cmp ah, 0x4c
+    je delete_all_threads
 
-    ; exit if not 4b
+    ; Go to original if not 4b
     cmp ah, 0x4b
-    jne oldINT21
+    jne old_int21
 
-    ; exit if below 10
+    ; Go to original if AL < 10
     cmp al, 0x10
-    jb oldINT21
+    jb old_int21
 
-    createCheck:
+    create_check:
         cmp al, 0x10
-        jne deleteCheck
+        jne delete_check
         ;check thread count and exit if >= 16
         call get_free_pcb  ; ax = available PCB
         call init_pcb      ; initialize it
@@ -269,32 +270,35 @@ int21isr:
         add word [thread_count], 1
         iret 8 ; Clean user args (entrypoint & void* segment-offset pair)
 
-    deleteCheck: ; remove from dispatcher + set 'free' flag
+    delete_check: ; remove from dispatcher + set 'free' flag
         cmp al, 0x11
-        jne suspendCheck
+        jne suspend_check
         ; if trying to delete '0' or >= 16, exit
         call delete_thread ; remove the thread from the thread 'chain' and set 'used' to false
         sub word [thread_count], 1
-        jmp exitINT21
+        jmp exit_int21
 
-    suspendCheck: ; remove from dispatcher (w/o modifying the free flag)
+    suspend_check: ; remove from dispatcher (w/o modifying the free flag)
         cmp al, 0x12
-        jne resumeCheck
+        jne resume_check
         ; if trying to suspend TID '0' or TID >= 16, exit
         call suspend_thread ; trivially set the suspend flag to true
-        jmp exitINT21
+        jmp exit_int21
 
-    resumeCheck: ; Shrimply insert the thread back into the linked list (dispatcher)
+    resume_check: ; Shrimply insert the thread back into the linked list (dispatcher)
         cmp al, 0x13
-        jne oldINT21
+        jne old_int21
         ; if trying to resume TID '0' or TID >= 16, exit
         call resume_thread
 
-    exitINT21:
+    exit_int21:
         ; TODO: ax should have 0xFF for failure, 0xEE (or PCB no. if insert) for success
         iret
 
-    oldINT21:
+    delete_all_threads:
+        ; TODO
+
+    old_int21:
         jmp [old21]
 
 start:
