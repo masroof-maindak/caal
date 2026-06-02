@@ -292,57 +292,57 @@ int21isr:
     cmp al, 0x10
     jb old_int21
 
-    create_check:
-        cmp al, 0x10
-        jne delete_check
+create_check:
+    cmp al, 0x10
+    jne delete_check
 
-        cmp word [thread_count], 16
-        jae exit_int21
+    cmp word [thread_count], 16
+    jae exit_int21
 
-        call get_free_pcb  ; ax = available PCB
-        cmp ax, 0xFF
-        je exit_int21
+    call get_free_pcb  ; ax = available PCB
+    cmp ax, 0xFF
+    je exit_int21
 
-        call init_pcb      ; initialize it
-        call insert_thread ;
-        add word [thread_count], 1
-        iret 8 ; Clean user args (entrypoint & void *arg (segment-offset pair))
+    call init_pcb      ; initialize it
+    call insert_thread ;
+    add word [thread_count], 1
+    iret 8 ; Clean user args (entrypoint & void *arg (segment-offset pair))
 
-    ; CHECK: how do we know which TID to delete/suspend/resume inside int21?
-    ; Use another register for recieving that TID as a parameter perhaps?
+; CHECK: how do we know which TID to delete/suspend/resume inside int21?
+; Use another register for recieving that TID as a parameter perhaps?
 
-    delete_check:
-        cmp al, 0x11
-        jne suspend_check
-        ; TODO: if trying to delete TID '0' or TID >= 16, exit
-        call delete_thread ; TODO: remove the thread from the LL (dispatcher)
-                           ; and set 'free flag' to true
-        sub word [thread_count], 1
-        jmp exit_int21
+delete_check:
+    cmp al, 0x11
+    jne suspend_check
+    ; TODO: if trying to delete TID '0' or TID >= 16, exit
+    call delete_thread ; TODO: remove the thread from the LL (dispatcher)
+                       ; and set 'free flag' to true
+    sub word [thread_count], 1
+    jmp exit_int21
 
-    suspend_check: ; remove from dispatcher (w/o modifying the free flag)
-        cmp al, 0x12
-        jne resume_check
-        ; TODO: if trying to suspend TID '0' or TID >= 16, exit
-        call suspend_thread ; TODO: set suspend flag to true
-        jmp exit_int21
+suspend_check: ; remove from dispatcher (w/o modifying the free flag)
+    cmp al, 0x12
+    jne resume_check
+    ; TODO: if trying to suspend TID '0' or TID >= 16, exit
+    call suspend_thread ; TODO: set suspend flag to true
+    jmp exit_int21
 
-    resume_check:
-        cmp al, 0x13
-        jne old_int21
-        ; TODO: if trying to resume TID '0' or TID >= 16, exit
-        call resume_thread ; TODO: set suspend_flag to false
+resume_check:
+    cmp al, 0x13
+    jne old_int21
+    ; TODO: if trying to resume TID '0' or TID >= 16, exit
+    call resume_thread ; TODO: set suspend_flag to false
 
-    exit_int21:
-        ; NOTE: ax should have 0xFF for failure, 0xEE (or PCB no. if insert)
-        ; for success
-        iret
+exit_int21:
+    ; NOTE: ax should have 0xFF for failure, 0xEE (or PCB no. if insert)
+    ; for success
+    iret
 
-    delete_all_threads:
-        ; TODO
+delete_all_threads:
+    ; TODO
 
-    old_int21:
-        jmp [old21]
+old_int21:
+    jmp [old21]
 
 start:
     xor ax, ax
