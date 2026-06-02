@@ -18,12 +18,12 @@ threadcount: dw 1         ; no. of active threads (i.e free flag != 1)
 ; Structure of one chunk in the PCB:
 ;  02 bytes - prev/next indexes
 ;  01 byte  - free flag (i.e high if current PCB is not in use)
-;  01 byte  - priority
+;  01 byte  - priority/suspend flag
 ;  28 bytes - general purpose registers
 
 LL_SAVE: EQU 0
 FREE_FLAG: EQU 2
-PR_SAVE: EQU 3
+PRSU_SAVE: EQU 3 ; Priority/Suspend Flag
 AX_SAVE: EQU 4
 BX_SAVE: EQU 6
 CX_SAVE: EQU 8
@@ -48,8 +48,10 @@ get_next:
     ; If the tick count is equal to the currproc's priority, then reset it and
     ; get the next free PCB; else, increment tick count (can be optimised
     ; further to prevent unnecessary restores)
+    ;
+    ; However, this system does NOT contain priority, and instead opted for the
+    ; ability to suspend/resume threads instead
 
-    ; TODO: ignore processes that are suspended!
     mov bx, ax
     shl bx, 5
     mov ax, [PCB+LL_SAVE+bx]
@@ -113,8 +115,11 @@ insert_thread:
     ret
 
 ; @brief receives pcb # to init in ax.
-; @detail it cleans up the registers, copies over the argument's address to the stack
-; and sets a fake return address
+; @detail it cleans up the registers, copies over the argument's address to the
+; stack and sets a fake return address
+;
+; NOTE: Were we to implement priority handling, we could throw the PCB no. in
+; ah, and the priority in al
 init_pcb:
     push bp
     mov bp, sp
@@ -151,7 +156,7 @@ init_pcb:
     ; Init general purpose registers
     xor ax, ax
     mov byte [PCB+FREE_FLAG+bx], al
-    mov byte [PCB+PR_SAVE+bx], al
+    mov byte [PCB+PRSU_SAVE+bx], al
     mov word [PCB+AX_SAVE+bx], ax
     mov word [PCB+BX_SAVE+bx], ax
     mov word [PCB+CX_SAVE+bx], ax
@@ -290,7 +295,10 @@ int21isr:
     create_check:
         cmp al, 0x10
         jne delete_check
-        ; TODO: exit if thread_count >= 16
+
+        cmp word [thread_count], 16
+        jae exit_int21
+
         call get_free_pcb  ; ax = available PCB
         cmp ax, 0xFF
         je exit_int21
@@ -300,30 +308,33 @@ int21isr:
         add word [thread_count], 1
         iret 8 ; Clean user args (entrypoint & void *arg (segment-offset pair))
 
-    delete_check: ; remove from dispatcher + set 'free' flag
+    ; CHECK: how do we know which TID to delete/suspend/resume inside int21?
+    ; Use another register for recieving that TID as a parameter perhaps?
+
+    delete_check:
         cmp al, 0x11
         jne suspend_check
-        ; if trying to delete '0' or >= 16, exit
-        call delete_thread ; remove the thread from the thread 'chain' and set 'used' to false
+        ; TODO: if trying to delete TID '0' or TID >= 16, exit
+        call delete_thread ; TODO: remove the thread from the LL (dispatcher)
+                           ; and set 'free flag' to true
         sub word [thread_count], 1
         jmp exit_int21
 
     suspend_check: ; remove from dispatcher (w/o modifying the free flag)
         cmp al, 0x12
         jne resume_check
-        ; if trying to suspend TID '0' or TID >= 16, exit
-        call suspend_thread ; trivially set the suspend flag to true
+        ; TODO: if trying to suspend TID '0' or TID >= 16, exit
+        call suspend_thread ; TODO: set suspend flag to true
         jmp exit_int21
 
-    resume_check: ; Shrimply insert the thread back into the linked list
-                  ; (dispatcher)
+    resume_check:
         cmp al, 0x13
         jne old_int21
-        ; if trying to resume TID '0' or TID >= 16, exit
-        call resume_thread
+        ; TODO: if trying to resume TID '0' or TID >= 16, exit
+        call resume_thread ; TODO: set suspend_flag to false
 
     exit_int21:
-        ; TODO: ax should have 0xFF for failure, 0xEE (or PCB no. if insert)
+        ; NOTE: ax should have 0xFF for failure, 0xEE (or PCB no. if insert)
         ; for success
         iret
 
