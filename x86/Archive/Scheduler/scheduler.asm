@@ -12,8 +12,8 @@ old21: dd 0
 
 PCB: times 32*16 db 0     ; process control block - for 32 bytes/thread
 stacks: times 512*16 db 0 ; 512 bytes per stack per program
-currproc: dw 0            ; PCB number of currently active process
-threadcount: dw 1         ; no. of active threads (i.e free flag != 1)
+curr_proc: dw 0           ; PCB number of currently active process
+thread_count: dw 1        ; no. of active threads (i.e free flag != 1)
 
 ; Structure of one chunk in the PCB:
 ;  02 bytes - prev/next indexes
@@ -39,13 +39,17 @@ SS_SAVE: EQU 26
 FLAG_SAVE: EQU 28
 IP_SAVE: EQU 30
 
+subroutine_to_multitask:
+    ; TODO: do stuff
+    retf
+
 ; @brief receives current process in ax
 ; @return (in ax) the next PCB's number
 get_next:
     ; Priority handling?
     ;
     ; Maintain another global variable for the current tick count (init w/ 0)
-    ; If the tick count is equal to the currproc's priority, then reset it and
+    ; If the tick count is equal to the curr_proc's priority, then reset it and
     ; get the next free PCB; else, increment tick count (can be optimised
     ; further to prevent unnecessary restores)
     ;
@@ -94,7 +98,7 @@ receive_ret:
     ; This function exists to serve as a fake 'return address' reached via retf
     ; from the user's subroutine (whether maliciously or accidentally)
     ;
-    ; TODO: have this delete the thread that landed into it, using [currproc]
+    ; TODO: have this delete the thread that landed into it, using [curr_proc]
     ret
 
 ; Receives PCB entry to insert into the dispatcher (linked list) in ax
@@ -210,9 +214,94 @@ init_pcb:
     pop bp
     ret
 
+delete_thread:
+    ; TODO: remove the thread from the LL (dispatcher) and set 'free flag' to
+    ; true
+    ret
+
+suspend_thread:
+    ; TODO: set suspend flag to true
+    ret
+
+resume_thread:
+    ; TODO: set suspend flag to false
+    ret
+
+int21isr:
+    ; Before terminating, clean up state
+    cmp ah, 0x4c
+    je delete_all_threads
+
+    ; Go to original if not 4b
+    cmp ah, 0x4b
+    jne old_int21
+
+    ; Go to original if AL < 10
+    cmp al, 0x10
+    jb old_int21
+
+create_check:
+    cmp al, 0x10
+    jne delete_check
+
+    cmp word [thread_count], 16
+    jae exit_int21
+
+    call get_free_pcb  ; ax = available PCB
+    cmp ax, 0xFF
+    je exit_int21
+
+    call init_pcb      ; initialize its PCB
+    call insert_thread ; insert it into the dispatcher
+
+    push ax
+    add word [thread_count], 1
+    mov al, 0x20
+    out 0x20, al
+    pop ax
+
+    iret 8 ; Clean user args (entrypoint & void *arg (segment-offset pair))
+
+; NOTE: Use the stack for recieving that TID as a parameter perhaps?
+
+delete_check:
+    cmp al, 0x11
+    jne suspend_check
+    ; TODO: if trying to delete TID '0' or TID >= 16, exit
+    call delete_thread
+    sub word [thread_count], 1
+    jmp exit_int21
+
+suspend_check: ; remove from dispatcher (w/o modifying the free flag)
+    cmp al, 0x12
+    jne resume_check
+    ; TODO: if trying to suspend TID '0' or TID >= 16, exit
+    call suspend_thread
+    jmp exit_int21
+
+resume_check:
+    cmp al, 0x13
+    jne old_int21
+    ; TODO: if trying to resume TID '0' or TID >= 16, exit
+    call resume_thread
+
+exit_int21:
+    ; NOTE: ax should have 0xFF for failure, 0xEE for success
+    mov al, 0x20
+    out 0x20, al
+    iret 2
+
+delete_all_threads:
+    ; TODO: remove all threads from dispatcher
+    ; CHECK: recover original ISRs? Timer, probably. Old int21, do we even need
+    ; to?
+
+old_int21:
+    jmp [old21]
+
 int08isr:
     push bx
-    mov bx, [currproc]
+    mov bx, [curr_proc]
     shl bx, 5
 
     ; 1. SAVE STATE
@@ -241,9 +330,9 @@ int08isr:
     mov word [PCB+SP_SAVE+bx], sp
 
     ; 2. Get ID of the next process
-    mov ax, [currproc]
+    mov ax, [curr_proc]
     call get_next
-    mov word [currproc], ax
+    mov word [curr_proc], ax
     mov bx, ax
 
     ; 3. RESTORE STATE
@@ -279,71 +368,6 @@ int08isr:
     mov bx, [PCB+BX_SAVE+bx]
     iret
 
-int21isr:
-    ; Before terminating, clean up state
-    cmp ah, 0x4c
-    je delete_all_threads
-
-    ; Go to original if not 4b
-    cmp ah, 0x4b
-    jne old_int21
-
-    ; Go to original if AL < 10
-    cmp al, 0x10
-    jb old_int21
-
-create_check:
-    cmp al, 0x10
-    jne delete_check
-
-    cmp word [thread_count], 16
-    jae exit_int21
-
-    call get_free_pcb  ; ax = available PCB
-    cmp ax, 0xFF
-    je exit_int21
-
-    call init_pcb      ; initialize it
-    call insert_thread ;
-    add word [thread_count], 1
-    iret 8 ; Clean user args (entrypoint & void *arg (segment-offset pair))
-
-; CHECK: how do we know which TID to delete/suspend/resume inside int21?
-; Use another register for recieving that TID as a parameter perhaps?
-
-delete_check:
-    cmp al, 0x11
-    jne suspend_check
-    ; TODO: if trying to delete TID '0' or TID >= 16, exit
-    call delete_thread ; TODO: remove the thread from the LL (dispatcher)
-                       ; and set 'free flag' to true
-    sub word [thread_count], 1
-    jmp exit_int21
-
-suspend_check: ; remove from dispatcher (w/o modifying the free flag)
-    cmp al, 0x12
-    jne resume_check
-    ; TODO: if trying to suspend TID '0' or TID >= 16, exit
-    call suspend_thread ; TODO: set suspend flag to true
-    jmp exit_int21
-
-resume_check:
-    cmp al, 0x13
-    jne old_int21
-    ; TODO: if trying to resume TID '0' or TID >= 16, exit
-    call resume_thread ; TODO: set suspend_flag to false
-
-exit_int21:
-    ; NOTE: ax should have 0xFF for failure, 0xEE (or PCB no. if insert)
-    ; for success
-    iret
-
-delete_all_threads:
-    ; TODO
-
-old_int21:
-    jmp [old21]
-
 start:
     xor ax, ax
     mov es, ax
@@ -362,12 +386,45 @@ start:
     mov word [es:21*4], int21isr
     sti
 
-    ; TSR -- https://stanislavs.org/helppc/int_21-31.html
-    mov dx, start
-    add dx, 15
+    ; Thread 01
+    push ds      ; arg segment
+    mov bx, routine_arg
+    push bx      ; arg offset
+    push cs      ; task segment
+    mov bx, my_routine
+    push bx      ; task offset
+    mov ah, 0x4b ; scheduler function
+    mov al, 0x10 ; 'create' subfunction
+    int 21h
+
+    add [routine_arg], 1
+
+    ; Thread 02
+    push ds
+    mov bx, routine_arg
+    mov bx
+    push cs
+    mov bx, my_routine
+    push bx      ; task offset
+    mov ah, 0x4b ; scheduler function
+    mov al, 0x10 ; 'create' subfunction
+    int 21h
+
+    ; Calculate number of paragraphs to be made resident
+    mov dx, start ; point to end of resident portion
+    ; CHECK: add 100 for the PSP?
+    add dx, 15    ; round up to ensure division results in ceil
+
     mov cl, 4
-    shr dx, cl ; dx = 240
-               ; FIXME: dx *should* comprise 'memory size in paragraphs to
-               ; reserve'. I do NOT know where I got 240 from...
+    shr dx, cl    ; divide by paragraph size (16)
+
+    ; TSR -- https://stanislavs.org/helppc/int_21-31.html
     mov ax, 3100h
     int 21h
+
+; NOTE: we move this data definition here because it is not required after
+; we've converted the process to a TSR program; the other defines still stay at the top
+; as they need to be modified by the resident portion
+routine_arg:
+    dw 3 ; represents line_no
+
