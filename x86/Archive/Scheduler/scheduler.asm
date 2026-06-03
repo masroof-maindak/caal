@@ -39,7 +39,7 @@ SS_SAVE: EQU 26
 FLAG_SAVE: EQU 28
 IP_SAVE: EQU 30
 
-subroutine_to_multitask:
+my_routine:
     ; TODO: do stuff
     retf
 
@@ -195,7 +195,7 @@ init_pcb:
     ; behaviour
     mov [stacks+si], cs
     sub si, 2
-    mov [stacks+si], receive_ret
+    mov word [stacks+si], receive_ret
 
     ; Init stack pointer
     mov [PCB+SP_SAVE+bx], si
@@ -260,7 +260,7 @@ create_check:
     out 0x20, al
     pop ax
 
-    iret 8 ; Clean user args (entrypoint & void *arg (segment-offset pair))
+    iret
 
 ; NOTE: Use the stack for recieving that TID as a parameter perhaps?
 
@@ -289,7 +289,7 @@ exit_int21:
     ; NOTE: ax should have 0xFF for failure, 0xEE for success
     mov al, 0x20
     out 0x20, al
-    iret 2
+    iret
 
 delete_all_threads:
     ; TODO: remove all threads from dispatcher
@@ -396,19 +396,21 @@ start:
     mov ah, 0x4b ; scheduler function
     mov al, 0x10 ; 'create' subfunction
     int 21h
+    add sp, 8    ; pop arguments
 
-    add [routine_arg], 1
+    add word [routine_arg], 1
 
     ; Thread 02
     push ds
     mov bx, routine_arg
-    mov bx
+    push bx
     push cs
     mov bx, my_routine
-    push bx      ; task offset
-    mov ah, 0x4b ; scheduler function
-    mov al, 0x10 ; 'create' subfunction
+    push bx
+    mov ah, 0x4b
+    mov al, 0x10
     int 21h
+    add sp, 8
 
     ; Calculate number of paragraphs to be made resident
     mov dx, start ; point to end of resident portion
